@@ -1,7 +1,6 @@
 import re
 import json
-import base64
-from flask import Flask, request, render_template_string, Response
+from flask import Flask, request, render_template_string
 
 app = Flask(__name__)
 
@@ -41,7 +40,6 @@ HTML_TEMPLATE = """
         <h2>M3U & Manual Playlist Generator</h2>
 
         <form method="POST" enctype="multipart/form-data" id="playlistForm">
-            <!-- Hidden payload holder to carry state -->
             <input type="hidden" name="existing_payload" id="existing_payload" value='{{ current_json_str }}'>
 
             <div class="form-group">
@@ -76,12 +74,11 @@ HTML_TEMPLATE = """
                 <input type="text" name="manual_url" placeholder="https://.../stream.m3u8">
             </div>
 
-            <button type="submit" name="action" value="add" class="btn">Add to Playlist</button>
+            <button type="submit" class="btn">Add to Playlist</button>
             <button type="button" onclick="clearData()" class="btn btn-danger">Clear All Data</button>
         </form>
     </div>
 
-    <!-- All Accumulated Links Details View -->
     {% if total_items > 0 %}
     <div class="card">
         <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -136,19 +133,16 @@ HTML_TEMPLATE = """
 </div>
 
 <script>
-    // Browser LocalStorage Persistence (Avoids Vercel stateless issue)
     const STORAGE_KEY = 'm3u_playlist_data';
 
     document.addEventListener("DOMContentLoaded", () => {
         const payloadInput = document.getElementById('existing_payload');
         const storedData = localStorage.getItem(STORAGE_KEY);
 
-        // If local storage has previous items and server form is clean, sync it
         if (storedData && payloadInput.value === '{"hero":[],"categories":[]}') {
             payloadInput.value = storedData;
         }
 
-        // Always save latest server response state into browser storage
         if (payloadInput.value && payloadInput.value !== '{"hero":[],"categories":[]}') {
             localStorage.setItem(STORAGE_KEY, payloadInput.value);
         }
@@ -180,13 +174,12 @@ HTML_TEMPLATE = """
 def generate_id(title):
     return re.sub(r'[^a-zA-Z0-9]', '_', title).lower()
 
-@app.route('/', methods=['GET', 'POST'])
-def index():
-    # Base structure
+@app.route('/', defaults={'path': ''}, methods=['GET', 'POST'])
+@app.route('/<path:path>', methods=['GET', 'POST'])
+def catch_all(path):
     playlist_data = {"hero": [], "categories": []}
     
     if request.method == 'POST':
-        # Retrieve previous state from hidden input
         raw_payload = request.form.get('existing_payload', '')
         if raw_payload:
             try:
@@ -198,7 +191,6 @@ def index():
         referer = request.form.get('referer', '').strip()
         new_items = []
 
-        # 1. Process M3U Upload
         m3u_file = request.files.get('m3u_file')
         if m3u_file and m3u_file.filename != '':
             content = m3u_file.read().decode('utf-8', errors='ignore')
@@ -229,7 +221,6 @@ def index():
                         new_items.append(current_item)
                         current_item = {}
 
-        # 2. Process Manual Entry
         manual_title = request.form.get('manual_title', '').strip()
         manual_url = request.form.get('manual_url', '').strip()
         manual_poster = request.form.get('manual_poster', '').strip()
@@ -243,7 +234,6 @@ def index():
                 'headers': {'Referer': referer} if referer else {}
             })
 
-        # 3. Merge into persistent structure
         if new_items:
             if not playlist_data.get('hero'):
                 playlist_data['hero'] = [new_items[0]]
@@ -263,7 +253,6 @@ def index():
                     'items': new_items
                 })
 
-    # Build a flat array of all links/details for display
     all_details = []
     total_items = 0
     for cat in playlist_data.get('categories', []):
@@ -290,4 +279,5 @@ def index():
         total_items=total_items
     )
 
-app_instance = app
+# Required by Vercel Serverless WSGI
+handler = app
