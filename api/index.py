@@ -1,10 +1,9 @@
 import re
 import json
-from flask import Flask, request, render_template_string, jsonify, Response
+from flask import Flask, request, render_template_string, jsonify
 
 app = Flask(__name__)
 
-# Global runtime cache for API endpoint access
 GLOBAL_PLAYLIST_CACHE = {"hero": [], "categories": []}
 
 HTML_TEMPLATE = """
@@ -35,7 +34,8 @@ HTML_TEMPLATE = """
         .badge { display: inline-block; padding: 3px 7px; font-size: 11px; font-weight: bold; color: #fff; background: #17a2b8; border-radius: 4px; }
         .badge-hero { background: #ffc107; color: #000; }
         .poster-img { width: 45px; height: 65px; object-fit: cover; border-radius: 4px; background: #eee; }
-        .api-banner { background: #e9ecef; padding: 10px 15px; border-left: 4px solid #007bff; border-radius: 4px; margin-bottom: 15px; }
+        .download-bar { display: flex; align-items: center; gap: 10px; }
+        .download-bar input { width: 220px; }
     </style>
 </head>
 <body>
@@ -43,12 +43,6 @@ HTML_TEMPLATE = """
 <div class="container">
     <div class="card">
         <h2>M3U & Manual Playlist Generator</h2>
-
-        <div class="api-banner">
-            <strong>Live API Endpoint:</strong> 
-            <a href="/playlist.json" target="_blank">/playlist.json</a> 
-            <small>(Access raw JSON data directly via URL)</small>
-        </div>
 
         <form method="POST" enctype="multipart/form-data" id="playlistForm">
             <input type="hidden" name="existing_payload" id="existing_payload" value='{{ current_json_str }}'>
@@ -92,9 +86,14 @@ HTML_TEMPLATE = """
 
     {% if total_items > 0 %}
     <div class="card">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h3>All Uploaded & Generated Links Details ({{ total_items }} Total)</h3>
-            <button onclick="downloadJSON()" class="btn btn-success">Export playlist.json</button>
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <h3>Uploaded Links Details ({{ total_items }} Total)</h3>
+            
+            <!-- Custom Filename & Download Controls -->
+            <div class="download-bar">
+                <input type="text" id="custom_filename" placeholder="movies.json">
+                <button onclick="downloadJSON()" class="btn btn-success">Export JSON</button>
+            </div>
         </div>
 
         <table>
@@ -150,7 +149,7 @@ HTML_TEMPLATE = """
 </div>
 
 <script>
-    const STORAGE_KEY = 'm3u_playlist_data_v4';
+    const STORAGE_KEY = 'm3u_playlist_data_v5';
 
     document.addEventListener("DOMContentLoaded", () => {
         const payloadInput = document.getElementById('existing_payload');
@@ -174,10 +173,22 @@ HTML_TEMPLATE = """
 
     function downloadJSON() {
         const payloadInput = document.getElementById('existing_payload').value;
+        let filename = document.getElementById('custom_filename').value.trim();
+
+        // Add default filename if input is empty
+        if (!filename) {
+            filename = 'playlist.json';
+        }
+        
+        // Append .json extension if omitted by user
+        if (!filename.toLowerCase().endsWith('.json')) {
+            filename += '.json';
+        }
+
         const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(JSON.parse(payloadInput), null, 4));
         const downloadAnchor = document.createElement('a');
         downloadAnchor.setAttribute("href", dataStr);
-        downloadAnchor.setAttribute("download", "playlist.json");
+        downloadAnchor.setAttribute("download", filename);
         document.body.appendChild(downloadAnchor);
         downloadAnchor.click();
         downloadAnchor.remove();
@@ -191,13 +202,11 @@ HTML_TEMPLATE = """
 def generate_id(title):
     return re.sub(r'[^a-zA-Z0-9]', '_', title).lower()
 
-# Route 1: Serve Raw API JSON
 @app.route('/playlist.json', methods=['GET'])
 @app.route('/api/playlist.json', methods=['GET'])
 def get_json_api():
     return jsonify(GLOBAL_PLAYLIST_CACHE)
 
-# Route 2: Main Application Route
 @app.route('/', defaults={'path': ''}, methods=['GET', 'POST'])
 @app.route('/<path:path>', methods=['GET', 'POST'])
 def catch_all(path):
@@ -289,10 +298,8 @@ def catch_all(path):
                         'items': category_items
                     })
 
-    # Update Global Cache for the API Endpoint
     GLOBAL_PLAYLIST_CACHE = playlist_data
 
-    # Build flat list for view rendering
     all_details = []
     total_items = 0
 
