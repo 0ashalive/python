@@ -1,50 +1,11 @@
 import re
 import json
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, jsonify, Response
 
 app = Flask(__name__)
 
-# Pre-populated Fast & Furious movies for Hero section
-DEFAULT_PLAYLIST_DATA = {
-    "hero": [
-        {
-            "id": "the_fast_and_the_furious_2001",
-            "title": "The Fast and the Furious (2001)",
-            "poster": "https://image.tmdb.org/t/p/w500/g4y1vJ6XiPjh3Z9vF7yVb6M8S2S.jpg",
-            "stream_url": "https://example.com/stream/fast1.m3u8",
-            "headers": {"Referer": "https://example.com/"}
-        },
-        {
-            "id": "2_fast_2_furious_2003",
-            "title": "2 Fast 2 Furious (2003)",
-            "poster": "https://image.tmdb.org/t/p/w500/6ch60a6e87hF7n6Bv2B9Y8d5P5h.jpg",
-            "stream_url": "https://example.com/stream/fast2.m3u8",
-            "headers": {"Referer": "https://example.com/"}
-        },
-        {
-            "id": "the_fast_and_the_furious_tokyo_drift_2006",
-            "title": "The Fast and the Furious: Tokyo Drift (2006)",
-            "poster": "https://image.tmdb.org/t/p/w500/gP3q8S3h8p8k2n9m1l9v8c7b6a5.jpg",
-            "stream_url": "https://example.com/stream/fast3.m3u8",
-            "headers": {"Referer": "https://example.com/"}
-        },
-        {
-            "id": "fast_furious_2009",
-            "title": "Fast & Furious (2009)",
-            "poster": "https://image.tmdb.org/t/p/w500/xXn041n0n2v8c7b6a5l9m1k2j3h.jpg",
-            "stream_url": "https://example.com/stream/fast4.m3u8",
-            "headers": {"Referer": "https://example.com/"}
-        },
-        {
-            "id": "fast_five_2011",
-            "title": "Fast Five (2011)",
-            "poster": "https://image.tmdb.org/t/p/w500/3s5l9m1k2j3h4g5f6e7d8c9b0a1.jpg",
-            "stream_url": "https://example.com/stream/fast5.m3u8",
-            "headers": {"Referer": "https://example.com/"}
-        }
-    ],
-    "categories": []
-}
+# Global runtime cache for API endpoint access
+GLOBAL_PLAYLIST_CACHE = {"hero": [], "categories": []}
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -74,6 +35,7 @@ HTML_TEMPLATE = """
         .badge { display: inline-block; padding: 3px 7px; font-size: 11px; font-weight: bold; color: #fff; background: #17a2b8; border-radius: 4px; }
         .badge-hero { background: #ffc107; color: #000; }
         .poster-img { width: 45px; height: 65px; object-fit: cover; border-radius: 4px; background: #eee; }
+        .api-banner { background: #e9ecef; padding: 10px 15px; border-left: 4px solid #007bff; border-radius: 4px; margin-bottom: 15px; }
     </style>
 </head>
 <body>
@@ -81,6 +43,12 @@ HTML_TEMPLATE = """
 <div class="container">
     <div class="card">
         <h2>M3U & Manual Playlist Generator</h2>
+
+        <div class="api-banner">
+            <strong>Live API Endpoint:</strong> 
+            <a href="/playlist.json" target="_blank">/playlist.json</a> 
+            <small>(Access raw JSON data directly via URL)</small>
+        </div>
 
         <form method="POST" enctype="multipart/form-data" id="playlistForm">
             <input type="hidden" name="existing_payload" id="existing_payload" value='{{ current_json_str }}'>
@@ -106,7 +74,7 @@ HTML_TEMPLATE = """
             <h3>Option B: Add Single Item Manually</h3>
             <div class="form-group">
                 <label>Title:</label>
-                <input type="text" name="manual_title" placeholder="e.g. Fast X">
+                <input type="text" name="manual_title" placeholder="e.g. Fast & Furious">
             </div>
             <div class="form-group">
                 <label>Poster URL:</label>
@@ -118,7 +86,7 @@ HTML_TEMPLATE = """
             </div>
 
             <button type="submit" class="btn">Add to Playlist</button>
-            <button type="button" onclick="clearData()" class="btn btn-danger">Reset to Default Hero</button>
+            <button type="button" onclick="clearData()" class="btn btn-danger">Clear All Data</button>
         </form>
     </div>
 
@@ -182,24 +150,23 @@ HTML_TEMPLATE = """
 </div>
 
 <script>
-    const STORAGE_KEY = 'm3u_playlist_data_v2';
-    const defaultData = {{ default_json_str | safe }};
+    const STORAGE_KEY = 'm3u_playlist_data_v4';
 
     document.addEventListener("DOMContentLoaded", () => {
         const payloadInput = document.getElementById('existing_payload');
         const storedData = localStorage.getItem(STORAGE_KEY);
 
-        if (storedData && payloadInput.value === JSON.stringify(defaultData)) {
+        if (storedData && payloadInput.value === '{"hero":[],"categories":[]}') {
             payloadInput.value = storedData;
         }
 
-        if (payloadInput.value) {
+        if (payloadInput.value && payloadInput.value !== '{"hero":[],"categories":[]}') {
             localStorage.setItem(STORAGE_KEY, payloadInput.value);
         }
     });
 
     function clearData() {
-        if (confirm("Are you sure you want to reset and restore default Hero items?")) {
+        if (confirm("Are you sure you want to delete all playlist links?")) {
             localStorage.removeItem(STORAGE_KEY);
             window.location.href = window.location.pathname;
         }
@@ -224,10 +191,18 @@ HTML_TEMPLATE = """
 def generate_id(title):
     return re.sub(r'[^a-zA-Z0-9]', '_', title).lower()
 
+# Route 1: Serve Raw API JSON
+@app.route('/playlist.json', methods=['GET'])
+@app.route('/api/playlist.json', methods=['GET'])
+def get_json_api():
+    return jsonify(GLOBAL_PLAYLIST_CACHE)
+
+# Route 2: Main Application Route
 @app.route('/', defaults={'path': ''}, methods=['GET', 'POST'])
 @app.route('/<path:path>', methods=['GET', 'POST'])
 def catch_all(path):
-    playlist_data = json.loads(json.dumps(DEFAULT_PLAYLIST_DATA))
+    global GLOBAL_PLAYLIST_CACHE
+    playlist_data = {"hero": [], "categories": []}
     
     if request.method == 'POST':
         raw_payload = request.form.get('existing_payload', '')
@@ -235,13 +210,13 @@ def catch_all(path):
             try:
                 playlist_data = json.loads(raw_payload)
             except Exception:
-                playlist_data = json.loads(json.dumps(DEFAULT_PLAYLIST_DATA))
+                playlist_data = {"hero": [], "categories": []}
 
         category_name = request.form.get('category_name', 'General').strip()
         referer = request.form.get('referer', '').strip()
         new_items = []
 
-        # 1. Process M3U Upload
+        # 1. Parse M3U File Upload
         m3u_file = request.files.get('m3u_file')
         if m3u_file and m3u_file.filename != '':
             content = m3u_file.read().decode('utf-8', errors='ignore')
@@ -272,7 +247,7 @@ def catch_all(path):
                         new_items.append(current_item)
                         current_item = {}
 
-        # 2. Process Manual Entry
+        # 2. Parse Manual Single Item
         manual_title = request.form.get('manual_title', '').strip()
         manual_url = request.form.get('manual_url', '').strip()
         manual_poster = request.form.get('manual_poster', '').strip()
@@ -286,28 +261,41 @@ def catch_all(path):
                 'headers': {'Referer': referer} if referer else {}
             })
 
-        # 3. Add to targeted category
+        # 3. Dynamic Split: Up to 5 items to Hero, remainder to Categories
         if new_items:
-            category_found = False
-            for cat in playlist_data.get('categories', []):
-                if cat.get('name') == category_name:
-                    cat['items'].extend(new_items)
-                    category_found = True
-                    break
+            current_hero_count = len(playlist_data.get('hero', []))
+            needed_for_hero = 5 - current_hero_count
 
-            if not category_found:
-                if 'categories' not in playlist_data:
-                    playlist_data['categories'] = []
-                playlist_data['categories'].append({
-                    'name': category_name,
-                    'items': new_items
-                })
+            if needed_for_hero > 0:
+                hero_additions = new_items[:needed_for_hero]
+                playlist_data['hero'].extend(hero_additions)
+                category_items = new_items[needed_for_hero:]
+            else:
+                category_items = new_items
 
-    # Prepare combined details list
+            if category_items:
+                category_found = False
+                for cat in playlist_data.get('categories', []):
+                    if cat.get('name') == category_name:
+                        cat['items'].extend(category_items)
+                        category_found = True
+                        break
+
+                if not category_found:
+                    if 'categories' not in playlist_data:
+                        playlist_data['categories'] = []
+                    playlist_data['categories'].append({
+                        'name': category_name,
+                        'items': category_items
+                    })
+
+    # Update Global Cache for the API Endpoint
+    GLOBAL_PLAYLIST_CACHE = playlist_data
+
+    # Build flat list for view rendering
     all_details = []
     total_items = 0
 
-    # Include Hero section items first
     for item in playlist_data.get('hero', []):
         total_items += 1
         all_details.append({
@@ -319,7 +307,6 @@ def catch_all(path):
             'headers': item.get('headers', {})
         })
 
-    # Include Category items
     for cat in playlist_data.get('categories', []):
         cat_name = cat.get('name', 'General')
         for item in cat.get('items', []):
@@ -335,16 +322,13 @@ def catch_all(path):
 
     current_json_str = json.dumps(playlist_data)
     current_json_pretty = json.dumps(playlist_data, indent=4, ensure_ascii=False)
-    default_json_str = json.dumps(DEFAULT_PLAYLIST_DATA)
 
     return render_template_string(
         HTML_TEMPLATE,
         current_json_str=current_json_str,
         current_json_pretty=current_json_pretty,
-        default_json_str=default_json_str,
         all_details=all_details,
         total_items=total_items
     )
 
 handler = app
-
