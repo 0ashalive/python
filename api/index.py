@@ -4,6 +4,48 @@ from flask import Flask, request, render_template_string
 
 app = Flask(__name__)
 
+# Pre-populated Fast & Furious movies for Hero section
+DEFAULT_PLAYLIST_DATA = {
+    "hero": [
+        {
+            "id": "the_fast_and_the_furious_2001",
+            "title": "The Fast and the Furious (2001)",
+            "poster": "https://image.tmdb.org/t/p/w500/g4y1vJ6XiPjh3Z9vF7yVb6M8S2S.jpg",
+            "stream_url": "https://example.com/stream/fast1.m3u8",
+            "headers": {"Referer": "https://example.com/"}
+        },
+        {
+            "id": "2_fast_2_furious_2003",
+            "title": "2 Fast 2 Furious (2003)",
+            "poster": "https://image.tmdb.org/t/p/w500/6ch60a6e87hF7n6Bv2B9Y8d5P5h.jpg",
+            "stream_url": "https://example.com/stream/fast2.m3u8",
+            "headers": {"Referer": "https://example.com/"}
+        },
+        {
+            "id": "the_fast_and_the_furious_tokyo_drift_2006",
+            "title": "The Fast and the Furious: Tokyo Drift (2006)",
+            "poster": "https://image.tmdb.org/t/p/w500/gP3q8S3h8p8k2n9m1l9v8c7b6a5.jpg",
+            "stream_url": "https://example.com/stream/fast3.m3u8",
+            "headers": {"Referer": "https://example.com/"}
+        },
+        {
+            "id": "fast_furious_2009",
+            "title": "Fast & Furious (2009)",
+            "poster": "https://image.tmdb.org/t/p/w500/xXn041n0n2v8c7b6a5l9m1k2j3h.jpg",
+            "stream_url": "https://example.com/stream/fast4.m3u8",
+            "headers": {"Referer": "https://example.com/"}
+        },
+        {
+            "id": "fast_five_2011",
+            "title": "Fast Five (2011)",
+            "poster": "https://image.tmdb.org/t/p/w500/3s5l9m1k2j3h4g5f6e7d8c9b0a1.jpg",
+            "stream_url": "https://example.com/stream/fast5.m3u8",
+            "headers": {"Referer": "https://example.com/"}
+        }
+    ],
+    "categories": []
+}
+
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
@@ -13,7 +55,7 @@ HTML_TEMPLATE = """
     <title>M3U & Manual Playlist Generator</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background: #f4f6f9; color: #333; }
-        .container { max-width: 900px; margin: auto; }
+        .container { max-width: 950px; margin: auto; }
         .card { background: #fff; padding: 25px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         .form-group { margin-bottom: 15px; }
         label { display: block; font-weight: bold; margin-bottom: 5px; }
@@ -30,7 +72,8 @@ HTML_TEMPLATE = """
         th { background: #007bff; color: white; }
         tr:nth-child(even) { background-color: #f9f9f9; }
         .badge { display: inline-block; padding: 3px 7px; font-size: 11px; font-weight: bold; color: #fff; background: #17a2b8; border-radius: 4px; }
-        .poster-img { width: 45px; height: 45px; object-fit: cover; border-radius: 4px; background: #eee; }
+        .badge-hero { background: #ffc107; color: #000; }
+        .poster-img { width: 45px; height: 65px; object-fit: cover; border-radius: 4px; background: #eee; }
     </style>
 </head>
 <body>
@@ -63,7 +106,7 @@ HTML_TEMPLATE = """
             <h3>Option B: Add Single Item Manually</h3>
             <div class="form-group">
                 <label>Title:</label>
-                <input type="text" name="manual_title" placeholder="e.g. HBO HD">
+                <input type="text" name="manual_title" placeholder="e.g. Fast X">
             </div>
             <div class="form-group">
                 <label>Poster URL:</label>
@@ -75,7 +118,7 @@ HTML_TEMPLATE = """
             </div>
 
             <button type="submit" class="btn">Add to Playlist</button>
-            <button type="button" onclick="clearData()" class="btn btn-danger">Clear All Data</button>
+            <button type="button" onclick="clearData()" class="btn btn-danger">Reset to Default Hero</button>
         </form>
     </div>
 
@@ -91,7 +134,7 @@ HTML_TEMPLATE = """
                 <tr>
                     <th>Poster</th>
                     <th>ID / Title</th>
-                    <th>Category</th>
+                    <th>Section / Category</th>
                     <th>Stream URL</th>
                     <th>Headers</th>
                 </tr>
@@ -101,7 +144,7 @@ HTML_TEMPLATE = """
                 <tr>
                     <td>
                         {% if item.poster %}
-                            <img src="{{ item.poster }}" class="poster-img" alt="Poster" onerror="this.src='https://via.placeholder.com/45?text=No+Image'">
+                            <img src="{{ item.poster }}" class="poster-img" alt="Poster" onerror="this.src='https://via.placeholder.com/45x65?text=No+Cover'">
                         {% else %}
                             <span style="color:#aaa;">No Image</span>
                         {% endif %}
@@ -110,7 +153,13 @@ HTML_TEMPLATE = """
                         <strong>{{ item.title }}</strong><br>
                         <small style="color: #666;">ID: {{ item.id }}</small>
                     </td>
-                    <td><span class="badge">{{ item.category }}</span></td>
+                    <td>
+                        {% if item.category == 'HERO' %}
+                            <span class="badge badge-hero">HERO SECTION</span>
+                        {% else %}
+                            <span class="badge">{{ item.category }}</span>
+                        {% endif %}
+                    </td>
                     <td><a href="{{ item.stream_url }}" target="_blank">{{ item.stream_url }}</a></td>
                     <td>
                         {% if item.headers and item.headers.Referer %}
@@ -133,23 +182,24 @@ HTML_TEMPLATE = """
 </div>
 
 <script>
-    const STORAGE_KEY = 'm3u_playlist_data';
+    const STORAGE_KEY = 'm3u_playlist_data_v2';
+    const defaultData = {{ default_json_str | safe }};
 
     document.addEventListener("DOMContentLoaded", () => {
         const payloadInput = document.getElementById('existing_payload');
         const storedData = localStorage.getItem(STORAGE_KEY);
 
-        if (storedData && payloadInput.value === '{"hero":[],"categories":[]}') {
+        if (storedData && payloadInput.value === JSON.stringify(defaultData)) {
             payloadInput.value = storedData;
         }
 
-        if (payloadInput.value && payloadInput.value !== '{"hero":[],"categories":[]}') {
+        if (payloadInput.value) {
             localStorage.setItem(STORAGE_KEY, payloadInput.value);
         }
     });
 
     function clearData() {
-        if (confirm("Are you sure you want to delete all accumulated playlist links?")) {
+        if (confirm("Are you sure you want to reset and restore default Hero items?")) {
             localStorage.removeItem(STORAGE_KEY);
             window.location.href = window.location.pathname;
         }
@@ -177,7 +227,7 @@ def generate_id(title):
 @app.route('/', defaults={'path': ''}, methods=['GET', 'POST'])
 @app.route('/<path:path>', methods=['GET', 'POST'])
 def catch_all(path):
-    playlist_data = {"hero": [], "categories": []}
+    playlist_data = json.loads(json.dumps(DEFAULT_PLAYLIST_DATA))
     
     if request.method == 'POST':
         raw_payload = request.form.get('existing_payload', '')
@@ -185,12 +235,13 @@ def catch_all(path):
             try:
                 playlist_data = json.loads(raw_payload)
             except Exception:
-                playlist_data = {"hero": [], "categories": []}
+                playlist_data = json.loads(json.dumps(DEFAULT_PLAYLIST_DATA))
 
         category_name = request.form.get('category_name', 'General').strip()
         referer = request.form.get('referer', '').strip()
         new_items = []
 
+        # 1. Process M3U Upload
         m3u_file = request.files.get('m3u_file')
         if m3u_file and m3u_file.filename != '':
             content = m3u_file.read().decode('utf-8', errors='ignore')
@@ -221,6 +272,7 @@ def catch_all(path):
                         new_items.append(current_item)
                         current_item = {}
 
+        # 2. Process Manual Entry
         manual_title = request.form.get('manual_title', '').strip()
         manual_url = request.form.get('manual_url', '').strip()
         manual_poster = request.form.get('manual_poster', '').strip()
@@ -234,10 +286,8 @@ def catch_all(path):
                 'headers': {'Referer': referer} if referer else {}
             })
 
+        # 3. Add to targeted category
         if new_items:
-            if not playlist_data.get('hero'):
-                playlist_data['hero'] = [new_items[0]]
-
             category_found = False
             for cat in playlist_data.get('categories', []):
                 if cat.get('name') == category_name:
@@ -253,8 +303,23 @@ def catch_all(path):
                     'items': new_items
                 })
 
+    # Prepare combined details list
     all_details = []
     total_items = 0
+
+    # Include Hero section items first
+    for item in playlist_data.get('hero', []):
+        total_items += 1
+        all_details.append({
+            'category': 'HERO',
+            'id': item.get('id', ''),
+            'title': item.get('title', ''),
+            'poster': item.get('poster', ''),
+            'stream_url': item.get('stream_url', ''),
+            'headers': item.get('headers', {})
+        })
+
+    # Include Category items
     for cat in playlist_data.get('categories', []):
         cat_name = cat.get('name', 'General')
         for item in cat.get('items', []):
@@ -270,14 +335,16 @@ def catch_all(path):
 
     current_json_str = json.dumps(playlist_data)
     current_json_pretty = json.dumps(playlist_data, indent=4, ensure_ascii=False)
+    default_json_str = json.dumps(DEFAULT_PLAYLIST_DATA)
 
     return render_template_string(
         HTML_TEMPLATE,
         current_json_str=current_json_str,
         current_json_pretty=current_json_pretty,
+        default_json_str=default_json_str,
         all_details=all_details,
         total_items=total_items
     )
 
-# Required by Vercel Serverless WSGI
 handler = app
+
